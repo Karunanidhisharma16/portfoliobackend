@@ -13,17 +13,28 @@ const app = express();
 // Allow requests from your frontend domain
 app.use(cors({
   origin: ['https://karunanidhi16.vercel.app', 'http://localhost:5173'],
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
 app.use(express.json());
 
-// Configure Nodemailer
+// Configure Nodemailer with timeout settings
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // Use TLS
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
-  }
+  },
+  tls: {
+    rejectUnauthorized: false
+  },
+  connectionTimeout: 10000,  // 10 seconds
+  greetingTimeout: 10000,
+  socketTimeout: 10000
 });
 
 console.log('📧 Email configured for:', process.env.EMAIL_USER);
@@ -38,6 +49,7 @@ app.post('/api/contact', async (req, res) => {
   try {
     const { name, email, message } = req.body;
     
+    // Validate input
     if (!name || !email || !message) {
       return res.status(400).json({ 
         success: false, 
@@ -45,7 +57,7 @@ app.post('/api/contact', async (req, res) => {
       });
     }
     
-    // Save to MongoDB
+    // Save to MongoDB first (most important)
     const newMessage = await Message.create({
       name,
       email,
@@ -54,7 +66,7 @@ app.post('/api/contact', async (req, res) => {
     
     console.log('✅ Message saved to database:', newMessage._id);
     
-    // Send email
+    // Try to send email (non-blocking if it fails)
     const mailOptions = {
       from: `"Portfolio Contact" <${process.env.EMAIL_USER}>`,
       to: process.env.EMAIL_USER,
@@ -81,10 +93,17 @@ ${message}
       `
     };
     
-    await transporter.sendMail(mailOptions);
+    // Send email with error handling
+    try {
+      await transporter.sendMail(mailOptions);
+      console.log('✅ Email sent successfully to:', process.env.EMAIL_USER);
+    } catch (emailError) {
+      // Log error but don't fail the request
+      console.error('⚠️ Email sending failed (message saved to DB):', emailError.message);
+      // Message is already saved, so we still return success
+    }
     
-    console.log(' Email sent successfully to:', process.env.EMAIL_USER);
-    
+    // Always return success if message was saved
     res.status(200).json({
       success: true,
       message: 'Message sent successfully!',
@@ -120,8 +139,8 @@ app.get('/api/messages', async (req, res) => {
   }
 });
 
-
+// Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(` Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
